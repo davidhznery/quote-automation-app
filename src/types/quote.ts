@@ -1,4 +1,4 @@
-export interface PartyDetails {
+export interface SupplierDetails {
   name?: string;
   companyName?: string;
   address?: string;
@@ -11,38 +11,32 @@ export interface QuoteItem {
   itemNumber?: string | null;
   description: string;
   quantity?: number | null;
-  unitPrice?: number | null;
-  totalPrice?: number | null;
+  unit?: string | null;
   notes?: string;
-}
-
-export interface QuoteTotals {
-  subtotal?: number | null;
-  taxes?: number | null;
-  shipping?: number | null;
-  discount?: number | null;
-  total?: number | null;
+  richDescription?: string | null;
 }
 
 export interface QuoteMetadata {
-  supplier?: PartyDetails;
-  customer?: PartyDetails;
-  quoteNumber?: string;
-  issueDate?: string;
-  expirationDate?: string;
-  currency?: string;
-  paymentTerms?: string;
-  deliveryTerms?: string;
-  projectName?: string;
-  additionalNotes?: string;
+  supplier?: SupplierDetails;
+  rfqNumber?: string | null;
+  issueDate?: string | null;
+  dueDate?: string | null;
+  subject?: string | null;
+  packing?: string | null;
+  deliveryTerms?: string | null;
+  currency?: string | null;
+  paymentTerms?: string | null;
+  guarantees?: string | null;
+  origin?: string | null;
+  packingRequirements?: string | null;
+  accessoriesInclusions?: string | null;
 }
 
 export interface QuoteExtraction {
   fullText: string;
   metadata: QuoteMetadata;
   items: QuoteItem[];
-  totals: QuoteTotals;
-  remarks?: string;
+  remarks?: string | null;
 }
 
 export interface QuoteDocumentRequest {
@@ -59,3 +53,4 @@ export interface BrandingProfile {
   primaryColor: string;
   accentColor: string;
 }
+

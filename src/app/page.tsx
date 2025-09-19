@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import type { ChangeEvent, DragEvent, ReactNode } from "react";
 import { defaultBranding } from "@/config/branding";
-import { computeTotals } from "@/lib/quoteSchema";
-import type { BrandingProfile, QuoteExtraction, QuoteItem, QuoteTotals } from "@/types/quote";
+import type { BrandingProfile, QuoteExtraction, QuoteItem } from "@/types/quote";
 
 interface UploadState {
   isDragging: boolean;
@@ -21,8 +20,6 @@ export default function Home() {
   const [isDownloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
-
-  const totals = useMemo(() => (quote ? computeTotals(quote.items, quote.totals) : null), [quote]);
 
   const handleFile = useCallback(async (file: File | null) => {
     if (!file) return;
@@ -45,13 +42,13 @@ export default function Home() {
 
       if (!response.ok) {
         const payload = await response.json().catch(() => ({ error: "Error desconocido" }));
-        throw new Error(payload.error ?? "Fallo al procesar la cotizacion");
+        throw new Error(payload.error ?? "Fallo al procesar el documento");
       }
 
-      const payload = await response.json();
-      setQuote(payload.data as QuoteExtraction);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Fallo inesperado";
+      const payload = (await response.json()) as { data: QuoteExtraction };
+      setQuote(payload.data);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Fallo inesperado";
       setError(message);
     } finally {
       setProcessing(false);
@@ -85,15 +82,20 @@ export default function Home() {
     });
   };
 
-  const handlePartyChange = (party: "supplier" | "customer", field: keyof NonNullable<QuoteExtraction["metadata"]["supplier"]>, value: string) => {
+  const handleSupplierChange = (
+    field: keyof NonNullable<QuoteExtraction["metadata"]["supplier"]>,
+    value: string
+  ) => {
     if (!quote) return;
-    const current = quote.metadata[party] ?? {};
-    const updated = { ...current, [field]: value.length ? value : undefined };
+    const current = quote.metadata.supplier ?? {};
     setQuote({
       ...quote,
       metadata: {
         ...quote.metadata,
-        [party]: updated,
+        supplier: {
+          ...current,
+          [field]: value.length ? value : undefined,
+        },
       },
     });
   };
@@ -103,42 +105,26 @@ export default function Home() {
 
     const updatedItems = quote.items.map((item, idx) => {
       if (idx !== index) return item;
-      if (field === "description" || field === "itemNumber" || field === "notes") {
-        return { ...item, [field]: value.length ? value : undefined };
+
+      if (field === "description" || field === "itemNumber" || field === "notes" || field === "unit") {
+        const trimmed = value.trim();
+        return { ...item, [field]: trimmed.length ? trimmed : undefined };
       }
 
-      const numericValue = parseNumberInput(value);
-      const nextItem: QuoteItem = {
-        ...item,
-        [field]: numericValue,
-      };
-
-      if ((field === "quantity" || field === "unitPrice") && nextItem.quantity != null && nextItem.unitPrice != null) {
-        nextItem.totalPrice = Number((nextItem.quantity * nextItem.unitPrice).toFixed(2));
+      if (field === "richDescription") {
+        return { ...item, richDescription: value.length ? value : undefined };
       }
 
-      if (field === "totalPrice" && numericValue == null && nextItem.quantity != null && nextItem.unitPrice != null) {
-        nextItem.totalPrice = Number((nextItem.quantity * nextItem.unitPrice).toFixed(2));
+      if (field === "quantity") {
+        return { ...item, quantity: parseNumberInput(value) };
       }
 
-      return nextItem;
+      return item;
     });
 
     setQuote({
       ...quote,
       items: updatedItems,
-    });
-  };
-
-  const handleTotalsChange = (field: keyof QuoteTotals, value: string) => {
-    if (!quote) return;
-    const numericValue = parseNumberInput(value);
-    setQuote({
-      ...quote,
-      totals: {
-        ...quote.totals,
-        [field]: numericValue,
-      },
     });
   };
 
@@ -149,12 +135,12 @@ export default function Home() {
       items: [
         ...quote.items,
         {
-          description: "",
           itemNumber: String(quote.items.length + 1),
+          description: "",
           quantity: null,
-          unitPrice: null,
-          totalPrice: null,
-          notes: undefined,
+          unit: "",
+          notes: "",
+          richDescription: "",
         },
       ],
     });
@@ -168,16 +154,27 @@ export default function Home() {
     });
   };
 
+  const handleBrandLineChange = (field: keyof BrandingProfile, value: string) => {
+    setBrand((current) => {
+      if (field === "addressLines" || field === "contactLines") {
+        return { ...current, [field]: splitLines(value) };
+      }
+
+      return { ...current, [field]: value } as BrandingProfile;
+    });
+  };
+
   const handleDownload = async () => {
     if (!quote) return;
     setDownloading(true);
     setError(null);
 
     try {
+      const preparedQuote = prepareQuoteForDocument(quote);
       const response = await fetch("/api/render-quote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quote, brand, reviewer }),
+        body: JSON.stringify({ quote: preparedQuote, brand, reviewer }),
       });
 
       if (!response.ok) {
@@ -189,28 +186,31 @@ export default function Home() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      const filename = quote.metadata.quoteNumber ? `cotizacion-${quote.metadata.quoteNumber}.pdf` : "cotizacion.pdf";
+      const sanitizedRfq = (quote.metadata.rfqNumber ?? "").replace(/[^a-zA-Z0-9_-]/g, "");
+      const filename = sanitizedRfq ? `rfq-${sanitizedRfq}.pdf` : "rfq.pdf";
       link.download = filename;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo descargar";
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "No se pudo descargar";
       setError(message);
     } finally {
       setDownloading(false);
     }
   };
 
+  const dropzoneClasses = `flex h-44 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed transition ${uploadState.isDragging ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-white hover:border-blue-400"}`;
+
   return (
     <main className="min-h-screen bg-slate-50 pb-16">
       <div className="mx-auto max-w-6xl px-6 py-12">
         <header className="mb-10">
-          <h1 className="text-3xl font-semibold text-slate-900">Automatiza tus cotizaciones</h1>
+          <h1 className="text-3xl font-semibold text-slate-900">Generate RFQ Documents</h1>
           <p className="mt-2 max-w-3xl text-sm text-slate-600">
-            Sube un PDF o imagen con la cotizacion de tu cliente. El sistema extrae los datos con OpenAI, los coloca en tu
-            plantilla y te permite revisarlos antes de generar el PDF final.
+            Upload a PDF or image that contains the technical details of your request. The assistant extracts the data,
+            maps everything to the RFQ structure, and lets you review it before creating the final document.
           </p>
         </header>
 
@@ -222,15 +222,13 @@ export default function Home() {
             }}
             onDragLeave={() => setUploadState({ isDragging: false })}
             onDrop={onDrop}
-            className={`flex h-44 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed transition ${
-              uploadState.isDragging ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-white hover:border-blue-400"
-            }`}
+            className={dropzoneClasses}
           >
             <input type="file" accept={ACCEPTED_TYPES.join(",")} className="hidden" onChange={onSelect} />
             <span className="text-base font-medium text-slate-900">
-              {isProcessing ? "Procesando la cotizacion..." : "Arrastra tu archivo o haz clic para buscar"}
+              {isProcessing ? "Processing document..." : "Drag your file here or click to browse"}
             </span>
-            <span className="mt-2 text-xs text-slate-500">Formatos aceptados: PDF, PNG, JPG, WEBP, TIFF (max 15 MB).</span>
+            <span className="mt-2 text-xs text-slate-500">Supported formats: PDF, PNG, JPG, WEBP, TIFF (max 15 MB).</span>
           </label>
 
           {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
@@ -238,239 +236,143 @@ export default function Home() {
 
         {quote ? (
           <div className="mt-12 grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)]">
-            <div className="space-y-8">
-              <Card title="Datos de la cotizacion">
+            <div className="space-y-6">
+              <Card title="RFQ Details">
                 <div className="grid gap-4 md:grid-cols-2">
-                  <TextField
-                    label="Numero de cotizacion"
-                    value={quote.metadata.quoteNumber ?? ""}
-                    onChange={(value) => handleMetadataChange("quoteNumber", value)}
+                  <TextField label="RFQ number" value={quote.metadata.rfqNumber ?? ""} onChange={(value) => handleMetadataChange("rfqNumber", value)} />
+                  <TextField label="Issue date" value={quote.metadata.issueDate ?? ""} onChange={(value) => handleMetadataChange("issueDate", value)} placeholder="2025-09-17" />
+                  <TextField label="Issue date limite" value={quote.metadata.dueDate ?? ""} onChange={(value) => handleMetadataChange("dueDate", value)} placeholder="2025-10-01" />
+                  <TextField label="Subject" value={quote.metadata.subject ?? ""} onChange={(value) => handleMetadataChange("subject", value)} placeholder="Request for..." />
+                </div>
+              </Card>
+
+              <Card title="Supplier">
+                <PartyForm data={quote.metadata.supplier} onChange={handleSupplierChange} />
+              </Card>
+
+              <Card title="Key Conditions">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <TextField label="Packing" value={quote.metadata.packing ?? ""} onChange={(value) => handleMetadataChange("packing", value)} />
+                  <TextField label="Delivery terms" value={quote.metadata.deliveryTerms ?? ""} onChange={(value) => handleMetadataChange("deliveryTerms", value)} />
+                  <TextField label="Currency" value={quote.metadata.currency ?? ""} onChange={(value) => handleMetadataChange("currency", value)} />
+                  <TextField label="Payment" value={quote.metadata.paymentTerms ?? ""} onChange={(value) => handleMetadataChange("paymentTerms", value)} />
+                  <TextField label="Guarantees" value={quote.metadata.guarantees ?? ""} onChange={(value) => handleMetadataChange("guarantees", value)} />
+                  <TextField label="Origin" value={quote.metadata.origin ?? ""} onChange={(value) => handleMetadataChange("origin", value)} />
+                </div>
+                <div className="mt-4 grid gap-4">
+                  <TextAreaField
+                    label="Packing requirements"
+                    value={quote.metadata.packingRequirements ?? ""}
+                    onChange={(value) => handleMetadataChange("packingRequirements", value)}
+                    placeholder="Provide packing requirements, materials, etc."
                   />
-                  <TextField
-                    label="Fecha de emision"
-                    value={quote.metadata.issueDate ?? ""}
-                    onChange={(value) => handleMetadataChange("issueDate", value)}
-                    placeholder="2025-09-17"
-                  />
-                  <TextField
-                    label="Validez"
-                    value={quote.metadata.expirationDate ?? ""}
-                    onChange={(value) => handleMetadataChange("expirationDate", value)}
-                    placeholder="30 dias"
-                  />
-                  <TextField
-                    label="Moneda"
-                    value={quote.metadata.currency ?? ""}
-                    onChange={(value) => handleMetadataChange("currency", value)}
-                    placeholder="USD"
-                  />
-                  <TextField
-                    label="Proyecto"
-                    value={quote.metadata.projectName ?? ""}
-                    onChange={(value) => handleMetadataChange("projectName", value)}
-                  />
-                  <TextField
-                    label="Terminos de pago"
-                    value={quote.metadata.paymentTerms ?? ""}
-                    onChange={(value) => handleMetadataChange("paymentTerms", value)}
-                  />
-                  <TextField
-                    label="Terminos de entrega"
-                    value={quote.metadata.deliveryTerms ?? ""}
-                    onChange={(value) => handleMetadataChange("deliveryTerms", value)}
-                  />
-                  <TextField
-                    label="Notas adicionales"
-                    value={quote.metadata.additionalNotes ?? ""}
-                    onChange={(value) => handleMetadataChange("additionalNotes", value)}
+                  <TextAreaField
+                    label="Accessories / Inclusions"
+                    value={quote.metadata.accessoriesInclusions ?? ""}
+                    onChange={(value) => handleMetadataChange("accessoriesInclusions", value)}
+                    placeholder="Brands, packing list with HS code, required certificates, etc."
                   />
                 </div>
               </Card>
 
-              <div className="grid gap-6 md:grid-cols-2">
-                <Card title="Proveedor">
-                  <PartyForm
-                    data={quote.metadata.supplier ?? {}}
-                    onChange={(field, value) => handlePartyChange("supplier", field, value)}
-                  />
-                </Card>
-                <Card title="Cliente">
-                  <PartyForm
-                    data={quote.metadata.customer ?? {}}
-                    onChange={(field, value) => handlePartyChange("customer", field, value)}
-                  />
-                </Card>
-              </div>
-
-              <Card title="Items">
-                <div className="space-y-4">
-                  {quote.items.map((item, index) => (
-                    <div key={index} className="rounded-lg border border-slate-200 p-4 shadow-sm">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="grid flex-1 gap-3 md:grid-cols-2">
-                          <TextField
-                            label="Codigo"
-                            value={item.itemNumber ?? ""}
-                            onChange={(value) => handleItemChange(index, "itemNumber", value)}
-                          />
-                          <TextField
-                            label="Descripcion"
-                            value={item.description}
-                            onChange={(value) => handleItemChange(index, "description", value)}
-                            required
-                          />
-                          <NumberField
-                            label="Cantidad"
-                            value={item.quantity}
-                            onChange={(value) => handleItemChange(index, "quantity", value)}
-                          />
-                          <NumberField
-                            label="Precio unitario"
-                            value={item.unitPrice}
-                            onChange={(value) => handleItemChange(index, "unitPrice", value)}
-                          />
-                          <NumberField
-                            label="Total"
-                            value={item.totalPrice}
-                            onChange={(value) => handleItemChange(index, "totalPrice", value)}
-                          />
-                          <TextField
-                            label="Notas"
-                            value={item.notes ?? ""}
-                            onChange={(value) => handleItemChange(index, "notes", value)}
-                          />
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => removeItem(index)}
-                          className="rounded-md border border-red-200 px-3 py-2 text-sm text-red-600 transition hover:bg-red-50"
-                        >
-                          Eliminar
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+              <Card
+                title="Requested Items"
+                action={
                   <button
                     type="button"
+                    className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
                     onClick={addItem}
-                    className="w-full rounded-md border border-dashed border-slate-300 px-4 py-3 text-sm font-medium text-slate-600 transition hover:border-blue-400 hover:text-blue-600"
                   >
-                    Agregar item
+                    Add item
                   </button>
+                }
+              >
+                <div className="space-y-6">
+                  {quote.items.map((item, index) => (
+                    <div key={`item-${index}`} className="rounded-md border border-slate-200 p-4">
+                      <div className="mb-3 flex items-center justify-between">
+                        <p className="text-sm font-semibold text-slate-700">Item {index + 1}</p>
+                        <button type="button" className="text-xs text-red-500 hover:underline" onClick={() => removeItem(index)}>
+                          Remove
+                        </button>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <TextField label="Reference" value={item.itemNumber ?? ""} onChange={(value) => handleItemChange(index, "itemNumber", value)} />
+                        <NumberField label="Quantity" value={item.quantity ?? null} onChange={(value) => handleItemChange(index, "quantity", value)} />
+                        <TextField label="Unit" value={item.unit ?? ""} onChange={(value) => handleItemChange(index, "unit", value)} placeholder="e.g., EA" />
+                      </div>
+                      <TextAreaField
+                        label="Description"
+                        value={item.description ?? ""}
+                        onChange={(value) => handleItemChange(index, "description", value)}
+                        placeholder="Describe the material or service requested."
+                      />
+                      <TextAreaField
+                        label="Formatted Description"
+                        value={item.richDescription ?? ""}
+                        onChange={(value) => handleItemChange(index, "richDescription", value)}
+                        placeholder="Automatically generated by the assistant. You can edit it if needed."
+                        highlight
+                        helperText="This formatted content is what appears in the RFQ."
+                      />
+                      <TextAreaField
+                        label="Notes"
+                        value={item.notes ?? ""}
+                        onChange={(value) => handleItemChange(index, "notes", value)}
+                        placeholder="Conditions, drawing references, etc."
+                      />
+                    </div>
+                  ))}
                 </div>
               </Card>
 
-              <Card title="Totales">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <NumberField
-                    label="Subtotal"
-                    value={quote.totals.subtotal ?? totals?.subtotal ?? null}
-                    onChange={(value) => handleTotalsChange("subtotal", value)}
-                  />
-                  <NumberField
-                    label="Impuestos"
-                    value={quote.totals.taxes ?? null}
-                    onChange={(value) => handleTotalsChange("taxes", value)}
-                  />
-                  <NumberField
-                    label="Envio"
-                    value={quote.totals.shipping ?? null}
-                    onChange={(value) => handleTotalsChange("shipping", value)}
-                  />
-                  <NumberField
-                    label="Descuento"
-                    value={quote.totals.discount ?? null}
-                    onChange={(value) => handleTotalsChange("discount", value)}
-                  />
-                  <NumberField
-                    label="Total"
-                    value={quote.totals.total ?? totals?.total ?? null}
-                    onChange={(value) => handleTotalsChange("total", value)}
-                  />
-                </div>
-                {totals ? (
-                  <p className="mt-3 text-xs text-slate-500">
-                    Totales calculados automaticamente: Subtotal {formatCurrency(totals.subtotal, quote.metadata.currency)} / Total {" "}
-                    {formatCurrency(totals.total, quote.metadata.currency)}
-                  </p>
-                ) : null}
-              </Card>
-
-              <Card title="Plantilla de la empresa">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <TextField
-                    label="Nombre comercial"
-                    value={brand.companyName}
-                    onChange={(value) => setBrand({ ...brand, companyName: value })}
-                    required
-                  />
-                  <TextField
-                    label="Color principal"
-                    value={brand.primaryColor}
-                    onChange={(value) => setBrand({ ...brand, primaryColor: value })}
-                  />
-                  <TextField
-                    label="Color de acento"
-                    value={brand.accentColor}
-                    onChange={(value) => setBrand({ ...brand, accentColor: value })}
-                  />
-                  <TextField
-                    label="Ruta del logo"
-                    value={brand.logoRelativePath}
-                    onChange={(value) => setBrand({ ...brand, logoRelativePath: value })}
-                    helper="Coloca tu logo en /public y ajusta la ruta"
-                  />
-                  <TextAreaField
-                    label="Direccion (una linea por fila)"
-                    value={brand.addressLines.join("\n")}
-                    onChange={(value) => setBrand({ ...brand, addressLines: splitLines(value) })}
-                  />
-                  <TextAreaField
-                    label="Contacto (una linea por fila)"
-                    value={brand.contactLines.join("\n")}
-                    onChange={(value) => setBrand({ ...brand, contactLines: splitLines(value) })}
-                  />
-                  <TextField label="Revisado por" value={reviewer} onChange={setReviewer} placeholder="Nombre del responsable" />
-                </div>
-              </Card>
-
-              <Card title="Notas">
+              <Card title="Additional Notes">
                 <TextAreaField
-                  label="Comentarios finales"
+                  label="Notes for Supplier"
                   value={quote.remarks ?? ""}
                   onChange={(value) => setQuote({ ...quote, remarks: value.length ? value : undefined })}
+                  placeholder="Additional instructions for the supplier"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowRaw((prev) => !prev)}
-                  className="mt-3 text-xs text-blue-600 underline"
-                >
-                  {showRaw ? "Ocultar texto extraido" : "Ver texto completo extraido"}
-                </button>
-                {showRaw ? (
-                  <pre className="mt-3 max-h-60 overflow-y-auto rounded-md bg-slate-900 p-3 text-xs text-slate-100">
-                    {quote.fullText}
-                  </pre>
-                ) : null}
               </Card>
-            </div>
 
-            <aside className="space-y-6">
-              <Card title="Previsualizacion">
-                <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-                  <PreviewDocument quote={quote} brand={brand} totals={totals ?? quote.totals} reviewer={reviewer} />
+              <Card title="Branding & Reviewer">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <TextField label="Company name" value={brand.companyName} onChange={(value) => handleBrandLineChange("companyName", value)} />
+                  <TextField label="Primary color" value={brand.primaryColor} onChange={(value) => handleBrandLineChange("primaryColor", value)} />
+                  <TextField label="Accent color" value={brand.accentColor} onChange={(value) => handleBrandLineChange("accentColor", value)} />
+                  <TextField label="Logo path" value={brand.logoRelativePath} onChange={(value) => handleBrandLineChange("logoRelativePath", value)} />
+                </div>
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <TextAreaField label="Address" value={brand.addressLines.join("\n")} onChange={(value) => handleBrandLineChange("addressLines", value)} />
+                  <TextAreaField label="Contact" value={brand.contactLines.join("\n")} onChange={(value) => handleBrandLineChange("contactLines", value)} />
+                </div>
+                <div className="mt-4">
+                  <TextField label="Reviewed by" value={reviewer} onChange={setReviewer} />
                 </div>
               </Card>
 
-              <button
-                type="button"
-                disabled={isDownloading}
-                onClick={handleDownload}
-                className="flex w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:bg-blue-300"
-              >
-                {isDownloading ? "Generando PDF..." : "Descargar PDF"}
-              </button>
-            </aside>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  disabled={isDownloading}
+                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isDownloading ? "Generating PDF..." : "Download RFQ"}
+                </button>
+                <ToggleWithLabel label="Show JSON" checked={showRaw} onChange={setShowRaw} />
+              </div>
+
+              {showRaw ? (
+                <pre className="max-h-96 overflow-auto rounded-md bg-slate-900 p-4 text-xs text-slate-100">
+                  {JSON.stringify(quote, null, 2)}
+                </pre>
+              ) : null}
+            </div>
+
+            <Card title="Preview">
+              <PreviewDocument quote={quote} brand={brand} reviewer={reviewer} />
+            </Card>
           </div>
         ) : null}
       </div>
@@ -478,72 +380,83 @@ export default function Home() {
   );
 }
 
-function Card({ title, children }: { title: string; children: ReactNode }) {
+function Card({ title, children, action }: { title?: string; children: ReactNode; action?: ReactNode }) {
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-      <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-      <div className="mt-4 space-y-4 text-sm text-slate-700">{children}</div>
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      {title ? (
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-base font-semibold text-slate-900">{title}</h2>
+          {action ?? null}
+        </div>
+      ) : null}
+      <div className="space-y-4">{children}</div>
     </section>
   );
 }
 
-function TextField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  required,
-  helper,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  required?: boolean;
-  helper?: string;
-}) {
+function TextField({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string }) {
   return (
-    <label className="flex flex-col gap-1 text-sm text-slate-600">
-      <span className="font-medium text-slate-800">
-        {label}
-        {required ? <span className="ml-1 text-red-500">*</span> : null}
-      </span>
+    <label className="flex flex-col text-xs font-medium text-slate-600">
+      <span className="mb-1 uppercase tracking-wide">{label}</span>
       <input
-        className="rounded-md border border-slate-300 px-3 py-2 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
         value={value}
-        onChange={(event) => onChange(event.currentTarget.value)}
         placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        className="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring focus:ring-blue-100"
       />
-      {helper ? <span className="text-xs text-slate-400">{helper}</span> : null}
     </label>
   );
 }
 
-function TextAreaField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+function TextAreaField({ label, value, onChange, placeholder, highlight = false, helperText }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; highlight?: boolean; helperText?: string }) {
+  const containerClass = highlight
+    ? "flex flex-col rounded-md border border-blue-200 bg-blue-50 p-3 text-xs font-medium text-slate-600 shadow-inner"
+    : "flex flex-col text-xs font-medium text-slate-600";
+  const labelClass = highlight
+    ? "mb-2 uppercase tracking-wide text-blue-900"
+    : "mb-1 uppercase tracking-wide";
+  const textareaClass = highlight
+    ? "rounded-md border border-blue-200 bg-white/80 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring focus:ring-blue-100"
+    : "rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring focus:ring-blue-100";
+
   return (
-    <label className="flex flex-col gap-1 text-sm text-slate-600">
-      <span className="font-medium text-slate-800">{label}</span>
+    <label className={containerClass}>
+      <span className={labelClass}>{label}</span>
       <textarea
-        className="min-h-[90px] rounded-md border border-slate-300 px-3 py-2 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
         value={value}
-        onChange={(event) => onChange(event.currentTarget.value)}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        rows={4}
+        className={textareaClass}
+      />
+      {helperText ? <span className="mt-2 text-[11px] font-normal text-blue-800">{helperText}</span> : null}
+    </label>
+  );
+}
+
+function NumberField({ label, value, onChange }: { label: string; value: number | null; onChange: (value: string) => void }) {
+  return (
+    <label className="flex flex-col text-xs font-medium text-slate-600">
+      <span className="mb-1 uppercase tracking-wide">{label}</span>
+      <input
+        value={value ?? ""}
+        onChange={(event) => onChange(event.target.value)}
+        className="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring focus:ring-blue-100"
       />
     </label>
   );
 }
 
-function NumberField({ label, value, onChange }: { label: string; value: number | null | undefined; onChange: (value: string) => void }) {
+function ToggleWithLabel({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
   return (
-    <label className="flex flex-col gap-1 text-sm text-slate-600">
-      <span className="font-medium text-slate-800">{label}</span>
+    <label className="flex items-center gap-2 text-sm text-slate-600">
       <input
-        type="number"
-        inputMode="decimal"
-        step="0.01"
-        className="rounded-md border border-slate-300 px-3 py-2 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-        value={value ?? ""}
-        onChange={(event) => onChange(event.currentTarget.value)}
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
       />
+      {label}
     </label>
   );
 }
@@ -552,35 +465,37 @@ function PartyForm({
   data,
   onChange,
 }: {
-  data: NonNullable<QuoteExtraction["metadata"]["supplier"]>;
+  data?: QuoteExtraction["metadata"]["supplier"];
   onChange: (field: keyof NonNullable<QuoteExtraction["metadata"]["supplier"]>, value: string) => void;
 }) {
+  const supplier = data ?? {};
+
   return (
     <div className="space-y-3 text-sm">
-      <TextField label="Empresa" value={data.companyName ?? ""} onChange={(value) => onChange("companyName", value)} />
-      <TextField label="Contacto" value={data.name ?? ""} onChange={(value) => onChange("name", value)} />
-      <TextAreaField label="Direccion" value={data.address ?? ""} onChange={(value) => onChange("address", value)} />
-      <TextField label="Telefono" value={data.phone ?? ""} onChange={(value) => onChange("phone", value)} />
-      <TextField label="Email" value={data.email ?? ""} onChange={(value) => onChange("email", value)} />
-      <TextField label="Identificacion fiscal" value={data.taxId ?? ""} onChange={(value) => onChange("taxId", value)} />
+      <TextField label="Empresa" value={supplier.companyName ?? ""} onChange={(value) => onChange("companyName", value)} />
+      <TextField label="Contact" value={supplier.name ?? ""} onChange={(value) => onChange("name", value)} />
+      <TextAreaField label="Address" value={supplier.address ?? ""} onChange={(value) => onChange("address", value)} />
+      <TextField label="Telefono" value={supplier.phone ?? ""} onChange={(value) => onChange("phone", value)} />
+      <TextField label="Email" value={supplier.email ?? ""} onChange={(value) => onChange("email", value)} />
+      <TextField label="Identificacion fiscal" value={supplier.taxId ?? ""} onChange={(value) => onChange("taxId", value)} />
     </div>
   );
 }
 
-function PreviewDocument({
-  quote,
-  brand,
-  totals,
-  reviewer,
-}: {
-  quote: QuoteExtraction;
-  brand: BrandingProfile;
-  totals: QuoteTotals;
-  reviewer: string;
-}) {
+function PreviewDocument({ quote, brand, reviewer }: { quote: QuoteExtraction; brand: BrandingProfile; reviewer: string }) {
+  const { metadata } = quote;
+  const summaryEntries: Array<[string, string | null | undefined]> = [
+    ["Packing", metadata.packing],
+    ["Delivery terms", metadata.deliveryTerms],
+    ["Currency", metadata.currency],
+    ["Payment", metadata.paymentTerms],
+    ["Guarantees", metadata.guarantees],
+    ["Origin", metadata.origin],
+  ];
+
   return (
-    <div className="space-y-4 text-sm text-slate-700">
-      <div className="flex items-start justify-between gap-4">
+    <div className="space-y-5 text-sm text-slate-700">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-lg font-semibold text-slate-900">{brand.companyName}</p>
           <div className="mt-1 text-xs text-slate-500">
@@ -593,75 +508,77 @@ function PreviewDocument({
           </div>
         </div>
         <div className="text-right text-xs text-slate-500">
-          <p>Numero: {quote.metadata.quoteNumber ?? "-"}</p>
-          <p>Fecha: {quote.metadata.issueDate ?? "-"}</p>
-          <p>Validez: {quote.metadata.expirationDate ?? "-"}</p>
+          <p>RFQ #: {metadata.rfqNumber ?? "-"}</p>
+          <p>Date: {metadata.issueDate ?? "-"}</p>
+          <p>Due date: {metadata.dueDate ?? "-"}</p>
         </div>
       </div>
 
-      <div className="grid gap-4 rounded-md bg-slate-100 p-4 md:grid-cols-2">
-        <div>
-          <p className="text-xs font-semibold uppercase text-slate-500">Proveedor</p>
-          <PartyPreview data={quote.metadata.supplier} />
-        </div>
-        <div>
-          <p className="text-xs font-semibold uppercase text-slate-500">Cliente</p>
-          <PartyPreview data={quote.metadata.customer} />
-        </div>
+      <div className="rounded-md bg-slate-100 p-3">
+        <p className="text-xs font-semibold uppercase text-slate-500">Subject</p>
+        <p className="mt-1 text-sm text-slate-700">{metadata.subject ?? "-"}</p>
       </div>
 
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="border-b border-slate-200">
-            <th className="py-2 text-left font-semibold text-slate-600">#</th>
-            <th className="py-2 text-left font-semibold text-slate-600">Descripcion</th>
-            <th className="py-2 text-right font-semibold text-slate-600">Cantidad</th>
-            <th className="py-2 text-right font-semibold text-slate-600">Unitario</th>
-            <th className="py-2 text-right font-semibold text-slate-600">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          {quote.items.map((item, index) => (
-            <tr key={`preview-item-${index}`} className="border-b border-slate-100">
-              <td className="py-2 text-slate-500">{index + 1}</td>
-              <td className="py-2 text-slate-700">{item.description}</td>
-              <td className="py-2 text-right text-slate-700">{formatNumber(item.quantity)}</td>
-              <td className="py-2 text-right text-slate-700">{formatCurrency(item.unitPrice, quote.metadata.currency)}</td>
-              <td className="py-2 text-right text-slate-700">{formatCurrency(item.totalPrice, quote.metadata.currency)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div>
+        <p className="text-xs font-semibold uppercase text-slate-500">Supplier</p>
+        <PartyPreview data={metadata.supplier} />
+      </div>
 
-      <div className="space-y-1 text-xs text-slate-600">
-        {totals.subtotal != null ? (
-          <div className="flex justify-between"><span>Subtotal</span><span>{formatCurrency(totals.subtotal, quote.metadata.currency)}</span></div>
-        ) : null}
-        {totals.taxes != null ? (
-          <div className="flex justify-between"><span>Impuestos</span><span>{formatCurrency(totals.taxes, quote.metadata.currency)}</span></div>
-        ) : null}
-        {totals.shipping != null ? (
-          <div className="flex justify-between"><span>Envio</span><span>{formatCurrency(totals.shipping, quote.metadata.currency)}</span></div>
-        ) : null}
-        {totals.discount != null ? (
-          <div className="flex justify-between"><span>Descuento</span><span>{formatCurrency(-Math.abs(totals.discount), quote.metadata.currency)}</span></div>
-        ) : null}
-        {totals.total != null ? (
-          <div className="flex justify-between text-sm font-semibold text-slate-900">
-            <span>Total</span>
-            <span>{formatCurrency(totals.total, quote.metadata.currency)}</span>
+      <div className="grid gap-3 md:grid-cols-2">
+        {summaryEntries.map(([label, value]) => (
+          <div key={label} className="rounded-md border border-slate-200 px-3 py-2 text-xs">
+            <p className="font-semibold uppercase text-slate-500">{label}</p>
+            <p className="mt-1 text-slate-700">{value && value.length > 0 ? value : "-"}</p>
           </div>
-        ) : null}
+        ))}
       </div>
 
-      {quote.remarks ? (
-        <div className="rounded-md bg-slate-100 p-3 text-xs text-slate-600">
-          <p className="font-semibold text-slate-700">Notas</p>
-          <p className="mt-1 whitespace-pre-wrap">{quote.remarks}</p>
+      <div>
+        <p className="text-xs font-semibold uppercase text-slate-500">Requested Items</p>
+        <table className="mt-2 w-full text-xs">
+          <thead>
+            <tr className="border-b border-slate-200">
+              <th className="py-2 text-left font-semibold text-slate-600">#</th>
+              <th className="py-2 text-left font-semibold text-slate-600">Description</th>
+              <th className="py-2 text-right font-semibold text-slate-600">Quantity</th>
+              <th className="py-2 text-left font-semibold text-slate-600">Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {quote.items.map((item, index) => (
+              <tr key={`preview-item-${index}`} className="border-b border-slate-100">
+                <td className="py-2 text-slate-500">{item.itemNumber ?? index + 1}</td>
+                <td className="py-2 text-slate-700 whitespace-pre-wrap">{item.richDescription ?? item.description}</td>
+                <td className="py-2 text-right text-slate-700">{formatNumber(item.quantity)}</td>
+                <td className="py-2 text-slate-600 whitespace-pre-wrap">{item.notes ?? ""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {metadata.packingRequirements ? (
+        <div className="rounded-md border border-slate-200 p-3 text-xs text-slate-600">
+          <p className="font-semibold uppercase text-slate-500">Packing requirements</p>
+          <p className="mt-1 whitespace-pre-wrap text-slate-700">{metadata.packingRequirements}</p>
         </div>
       ) : null}
 
-      {reviewer ? <p className="text-xs text-slate-500">Revisado por: {reviewer}</p> : null}
+      {metadata.accessoriesInclusions ? (
+        <div className="rounded-md border border-slate-200 p-3 text-xs text-slate-600">
+          <p className="font-semibold uppercase text-slate-500">Accessories / Inclusions</p>
+          <p className="mt-1 whitespace-pre-wrap text-slate-700">{metadata.accessoriesInclusions}</p>
+        </div>
+      ) : null}
+
+      {quote.remarks ? (
+        <div className="rounded-md border border-slate-200 p-3 text-xs text-slate-600">
+          <p className="font-semibold uppercase text-slate-500">Notes for Supplier</p>
+          <p className="mt-1 whitespace-pre-wrap text-slate-700">{quote.remarks}</p>
+        </div>
+      ) : null}
+
+      {reviewer ? <p className="text-xs text-slate-500">Reviewed by: {reviewer}</p> : null}
     </div>
   );
 }
@@ -685,6 +602,44 @@ function PartyPreview({ data }: { data?: QuoteExtraction["metadata"]["supplier"]
   );
 }
 
+function prepareQuoteForDocument(quote: QuoteExtraction): QuoteExtraction {
+  const ensureSupplier = (supplier?: QuoteExtraction["metadata"]["supplier"]): QuoteExtraction["metadata"]["supplier"] => ({
+    name: supplier?.name ?? "",
+    companyName: supplier?.companyName ?? "",
+    address: supplier?.address ?? "",
+    phone: supplier?.phone ?? "",
+    email: supplier?.email ?? "",
+    taxId: supplier?.taxId ?? "",
+  });
+
+  return {
+    ...quote,
+    remarks: quote.remarks ?? "",
+    metadata: {
+      supplier: ensureSupplier(quote.metadata?.supplier),
+      rfqNumber: quote.metadata?.rfqNumber ?? "",
+      issueDate: quote.metadata?.issueDate ?? "",
+      dueDate: quote.metadata?.dueDate ?? "",
+      subject: quote.metadata?.subject ?? "",
+      packing: quote.metadata?.packing ?? "Export seaworthy",
+      deliveryTerms: quote.metadata?.deliveryTerms ?? "Your best",
+      currency: quote.metadata?.currency ?? "EUR/USD",
+      paymentTerms: quote.metadata?.paymentTerms ?? "To be agreed",
+      guarantees: quote.metadata?.guarantees ?? "12/18 months",
+      origin: quote.metadata?.origin ?? "TBA",
+      packingRequirements: quote.metadata?.packingRequirements ?? "",
+      accessoriesInclusions: quote.metadata?.accessoriesInclusions ?? "",
+    },
+    items: quote.items.map((item) => ({
+      itemNumber: item.itemNumber ?? "",
+      description: item.description,
+      quantity: item.quantity ?? null,
+      notes: item.notes ?? "",
+      richDescription: item.richDescription ?? "",
+    })),
+  };
+}
+
 function parseNumberInput(value: string): number | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
@@ -703,19 +658,4 @@ function splitLines(value: string): string[] {
 function formatNumber(value: number | null | undefined): string {
   if (value == null) return "";
   return Number(value).toLocaleString("es-ES", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-}
-
-function formatCurrency(value: number | null | undefined, currency?: string): string {
-  if (value == null) return "";
-  const unit = currency && currency.length <= 5 ? currency.toUpperCase() : "USD";
-  try {
-    return Number(value).toLocaleString("es-ES", {
-      style: "currency",
-      currency: unit,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-  } catch (_error) {
-    return `${unit} ${Number(value).toFixed(2)}`;
-  }
 }

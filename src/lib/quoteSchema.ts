@@ -1,13 +1,15 @@
 import { z } from "zod";
-import type { QuoteExtraction, QuoteItem, QuoteTotals } from "@/types/quote";
+import type { QuoteExtraction, QuoteItem, QuoteMetadata } from "@/types/quote";
 
 const optionalString = z
-  .string()
-  .trim()
-  .optional()
-  .transform((value) => (value && value.length > 0 ? value : undefined));
+  .union([z.string(), z.null(), z.undefined()])
+  .transform((value) => {
+    if (typeof value !== "string") return undefined;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  });
 
-const contactSchema = z
+const supplierSchema = z
   .object({
     name: optionalString,
     companyName: optionalString,
@@ -24,99 +26,105 @@ const numberLike = z
 
 export const quoteItemSchema = z
   .object({
-    itemNumber: z.union([z.string(), z.null(), z.undefined()]).optional(),
+    itemNumber: optionalString,
     description: z.string().min(1, "La descripcion del item es obligatoria"),
     quantity: numberLike.optional(),
-    unitPrice: numberLike.optional(),
-    totalPrice: numberLike.optional(),
+    unit: optionalString,
     notes: optionalString,
+    richDescription: optionalString,
   })
   .transform((value) => ({
     ...value,
     quantity: value.quantity ?? null,
-    unitPrice: value.unitPrice ?? null,
-    totalPrice: value.totalPrice ?? null,
   }));
 
-export const quoteTotalsSchema = z
-  .object({
-    subtotal: numberLike.optional(),
-    taxes: numberLike.optional(),
-    shipping: numberLike.optional(),
-    discount: numberLike.optional(),
-    total: numberLike.optional(),
-  })
-  .transform((totals) => normaliseTotals(totals));
+const metadataDefaults = {
+  packing: "Export seaworthy",
+  deliveryTerms: "Your best",
+  currency: "EUR/USD",
+  paymentTerms: "To be agreed",
+  guarantees: "12/18 months",
+  origin: "TBA",
+} as const;
 
 export const quoteExtractionSchema = z
   .object({
     fullText: z.string().min(1),
     metadata: z
       .object({
-        supplier: contactSchema.optional(),
-        customer: contactSchema.optional(),
-        quoteNumber: optionalString,
+        supplier: supplierSchema.optional(),
+        rfqNumber: optionalString,
         issueDate: optionalString,
-        expirationDate: optionalString,
+        dueDate: optionalString,
+        subject: optionalString,
+        packing: optionalString,
+        deliveryTerms: optionalString,
         currency: optionalString,
         paymentTerms: optionalString,
-        deliveryTerms: optionalString,
-        projectName: optionalString,
-        additionalNotes: optionalString,
+        guarantees: optionalString,
+        origin: optionalString,
+        packingRequirements: optionalString,
+        accessoriesInclusions: optionalString,
       })
       .default({}),
     items: z.array(quoteItemSchema).min(1, "Debes incluir al menos un item"),
-    totals: quoteTotalsSchema.default({}),
     remarks: optionalString,
   })
   .transform((value) => ({
     ...value,
-    totals: value.totals ?? {},
+    metadata: applyMetadataDefaults(value.metadata ?? {}),
   }));
 
 export const quoteExtractionJsonSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["fullText", "items", "metadata", "totals"],
+  required: ["fullText", "items", "metadata", "remarks"],
   properties: {
-    fullText: { type: "string", description: "Texto completo de la cotizacion" },
+    fullText: { type: "string", description: "Texto completo del documento" },
     metadata: {
       type: "object",
       additionalProperties: false,
-      required: [],
+      required: [
+        "supplier",
+        "rfqNumber",
+        "issueDate",
+        "dueDate",
+        "subject",
+        "packing",
+        "deliveryTerms",
+        "currency",
+        "paymentTerms",
+        "guarantees",
+        "origin",
+        "packingRequirements",
+        "accessoriesInclusions",
+      ],
       properties: {
         supplier: {
           type: "object",
           additionalProperties: false,
+          required: ["name", "companyName", "address", "phone", "email", "taxId"],
           properties: {
-            name: { type: "string" },
-            companyName: { type: "string" },
-            address: { type: "string" },
-            phone: { type: "string" },
-            email: { type: "string" },
-            taxId: { type: "string" },
+            name: { type: ["string", "null"] },
+            companyName: { type: ["string", "null"] },
+            address: { type: ["string", "null"] },
+            phone: { type: ["string", "null"] },
+            email: { type: ["string", "null"] },
+            taxId: { type: ["string", "null"] },
           },
         },
-        customer: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            name: { type: "string" },
-            companyName: { type: "string" },
-            address: { type: "string" },
-            phone: { type: "string" },
-            email: { type: "string" },
-            taxId: { type: "string" },
-          },
-        },
-        quoteNumber: { type: "string" },
-        issueDate: { type: "string" },
-        expirationDate: { type: "string" },
-        currency: { type: "string" },
-        paymentTerms: { type: "string" },
-        deliveryTerms: { type: "string" },
-        projectName: { type: "string" },
-        additionalNotes: { type: "string" },
+        rfqNumber: { type: ["string", "null"] },
+        issueDate: { type: ["string", "null"] },
+        dueDate: { type: ["string", "null"] },
+        subject: { type: ["string", "null"] },
+        packing: { type: ["string", "null"] },
+        deliveryTerms: { type: ["string", "null"] },
+        currency: { type: ["string", "null"] },
+        paymentTerms: { type: ["string", "null"] },
+        guarantees: { type: ["string", "null"] },
+        origin: { type: ["string", "null"] },
+        packingRequirements: { type: ["string", "null"] },
+        accessoriesInclusions: { type: ["string", "null"] },
       },
     },
     items: {
@@ -125,29 +133,18 @@ export const quoteExtractionJsonSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["description"],
+        required: ["itemNumber", "description", "quantity", "unit", "notes", "richDescription"],
         properties: {
-          itemNumber: { type: "string" },
+          itemNumber: { type: ["string", "null"] },
           description: { type: "string" },
-          quantity: { type: "number" },
-          unitPrice: { type: "number" },
-          totalPrice: { type: "number" },
-          notes: { type: "string" },
+          quantity: { type: ["number", "null", "string"] },
+          unit: { type: ["string", "null"] },
+          notes: { type: ["string", "null"] },
+          richDescription: { type: ["string", "null"] },
         },
       },
     },
-    totals: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        subtotal: { type: "number" },
-        taxes: { type: "number" },
-        shipping: { type: "number" },
-        discount: { type: "number" },
-        total: { type: "number" },
-      },
-    },
-    remarks: { type: "string" },
+    remarks: { type: ["string", "null"] },
   },
 };
 
@@ -157,42 +154,28 @@ export function normalizeExtraction(raw: unknown): QuoteExtraction {
     throw new Error(parsed.error.issues.map((issue) => issue.message).join(" | "));
   }
 
+  const metadata = applyMetadataDefaults(parsed.data.metadata ?? {});
+
   return {
     fullText: parsed.data.fullText,
-    metadata: parsed.data.metadata ?? {},
-    items: parsed.data.items.map(fillMissingTotals),
-    totals: parsed.data.totals ?? {},
+    metadata,
+    items: parsed.data.items,
     remarks: parsed.data.remarks,
   };
 }
 
-function fillMissingTotals(item: QuoteItem): QuoteItem {
-  const cleanItem: QuoteItem = {
-    ...item,
-    itemNumber: item.itemNumber ?? undefined,
-    notes: item.notes,
+function applyMetadataDefaults(metadata: QuoteMetadata): QuoteMetadata {
+  return {
+    ...metadataDefaults,
+    ...metadata,
+    supplier: metadata.supplier,
+    packing: metadata.packing ?? metadataDefaults.packing,
+    deliveryTerms: metadata.deliveryTerms ?? metadataDefaults.deliveryTerms,
+    currency: metadata.currency ?? metadataDefaults.currency,
+    paymentTerms: metadata.paymentTerms ?? metadataDefaults.paymentTerms,
+    guarantees: metadata.guarantees ?? metadataDefaults.guarantees,
+    origin: metadata.origin ?? metadataDefaults.origin,
   };
-
-  if (cleanItem.totalPrice == null && cleanItem.quantity != null && cleanItem.unitPrice != null) {
-    cleanItem.totalPrice = Number((cleanItem.quantity * cleanItem.unitPrice).toFixed(2));
-  }
-
-  return cleanItem;
-}
-
-function normaliseTotals(totals: QuoteTotals): QuoteTotals {
-  const cleanTotals: QuoteTotals = {};
-  const keys: Array<keyof QuoteTotals> = ["subtotal", "taxes", "shipping", "discount", "total"];
-
-  for (const key of keys) {
-    const value = totals[key];
-    const normalised = normalizeNumber(value);
-    if (normalised != null && !Number.isNaN(normalised)) {
-      cleanTotals[key] = Number(normalised.toFixed(2));
-    }
-  }
-
-  return cleanTotals;
 }
 
 export function normalizeNumber(value: unknown): number | null {
@@ -222,28 +205,4 @@ export function normalizeNumber(value: unknown): number | null {
 
   const parsed = Number(normalised);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-export function computeTotals(items: QuoteItem[], currentTotals: QuoteTotals): QuoteTotals {
-  const subtotal = items.reduce((sum, item) => {
-    const amount = item.totalPrice ?? (item.quantity != null && item.unitPrice != null ? item.quantity * item.unitPrice : 0);
-    return sum + (amount ?? 0);
-  }, 0);
-
-  const taxes = currentTotals.taxes ?? null;
-  const shipping = currentTotals.shipping ?? null;
-  const discount = currentTotals.discount ?? null;
-
-  let total = currentTotals.total ?? null;
-  if (total == null) {
-    total = subtotal + (taxes ?? 0) + (shipping ?? 0) - (discount ?? 0);
-  }
-
-  return {
-    subtotal: Number(subtotal.toFixed(2)),
-    taxes,
-    shipping,
-    discount,
-    total: total != null ? Number(total.toFixed(2)) : Number((subtotal + (taxes ?? 0) + (shipping ?? 0) - (discount ?? 0)).toFixed(2)),
-  };
 }

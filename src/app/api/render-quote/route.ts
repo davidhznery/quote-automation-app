@@ -4,7 +4,7 @@ import path from "path";
 import { promises as fs } from "fs";
 import { z } from "zod";
 import { defaultBranding } from "@/config/branding";
-import { computeTotals, normalizeExtraction } from "@/lib/quoteSchema";
+import { normalizeExtraction } from "@/lib/quoteSchema";
 import type { BrandingProfile, QuoteExtraction } from "@/types/quote";
 
 export const runtime = "nodejs";
@@ -66,17 +66,10 @@ async function buildPdf(quote: QuoteExtraction, brand: BrandingProfile, reviewer
       doc.on("end", () => resolve(Buffer.concat(buffers)));
 
       await drawHeader(doc, brand, quote);
-      doc.moveDown(1.5);
-      drawSummary(doc, quote);
-      doc.moveDown(1);
+      drawSupplierSection(doc, quote);
+      drawKeyDetails(doc, quote);
       drawItemsTable(doc, quote);
-      doc.moveDown(1);
-      drawTotals(doc, quote);
-
-      if (quote.remarks || quote.metadata.additionalNotes || reviewer) {
-        doc.moveDown(1);
-        drawNotes(doc, quote, reviewer);
-      }
+      drawSections(doc, quote, reviewer);
 
       doc.end();
     } catch (error) {
@@ -102,154 +95,203 @@ async function drawHeader(doc: PDFKit.PDFDocument, brand: BrandingProfile, quote
   brand.addressLines.forEach((line) => doc.text(line));
   brand.contactLines.forEach((line) => doc.text(line));
 
-  doc.moveDown(1);
-  doc.fillColor(brand.accentColor).fontSize(16).text("Resumen de Cotizacion");
-  doc.fillColor("#111827");
-
   const meta = quote.metadata;
-  const details: Array<[string, string | undefined]> = [
-    ["Numero", meta.quoteNumber],
-    ["Fecha", meta.issueDate],
-    ["Validez", meta.expirationDate],
-    ["Moneda", meta.currency],
-    ["Proyecto", meta.projectName],
-    ["Terminos de pago", meta.paymentTerms],
-    ["Terminos de entrega", meta.deliveryTerms],
-  ];
-
-  details.forEach(([label, value]) => {
-    if (!value) return;
-    doc.fontSize(10).text(`${label}: ${value}`);
-  });
+  doc.moveDown(0.8);
+  doc.fillColor(brand.accentColor).fontSize(16).text("Request for Quotation");
+  doc.fillColor("#111827").fontSize(11);
+  doc.text(`RFQ #: ${meta.rfqNumber ?? "-"}`);
+  doc.text(`Date: ${meta.issueDate ?? "-"}`);
+  doc.text(`Due date: ${meta.dueDate ?? "-"}`);
+  if (meta.subject) {
+    doc.text(`Subject: ${meta.subject}`);
+  }
 }
 
-function drawSummary(doc: PDFKit.PDFDocument, quote: QuoteExtraction) {
+function drawSupplierSection(doc: PDFKit.PDFDocument, quote: QuoteExtraction) {
   const supplier = quote.metadata.supplier ?? {};
-  const customer = quote.metadata.customer ?? {};
+  const marginLeft = doc.page.margins?.left ?? 72;
 
-  doc.fontSize(12).fillColor("#111827").text("Proveedor", { underline: true });
-  drawPartyBlock(doc, supplier);
+  doc.moveDown(1);
+  doc.x = marginLeft;
+  doc.fontSize(12).fillColor("#111827").text("Supplier", { underline: true });
 
-  doc.moveDown(0.75);
-  doc.fontSize(12).fillColor("#111827").text("Cliente", { underline: true });
-  drawPartyBlock(doc, customer);
-}
-
-function drawPartyBlock(doc: PDFKit.PDFDocument, party: Record<string, string | undefined>) {
   const lines: string[] = [];
-  if (party.companyName) lines.push(party.companyName);
-  if (party.name && party.name !== party.companyName) lines.push(party.name);
-  if (party.address) lines.push(party.address);
-  if (party.phone) lines.push(`Tel: ${party.phone}`);
-  if (party.email) lines.push(`Email: ${party.email}`);
-  if (party.taxId) lines.push(`Tax ID: ${party.taxId}`);
+  if (supplier.companyName) lines.push(supplier.companyName);
+  if (supplier.name) lines.push(supplier.name);
+  if (supplier.address) lines.push(supplier.address);
+  if (supplier.phone) lines.push(`Tel: ${supplier.phone}`);
+  if (supplier.email) lines.push(`Email: ${supplier.email}`);
+  if (supplier.taxId) lines.push(`Tax ID: ${supplier.taxId}`);
 
   doc.fontSize(10).fillColor("#374151");
   if (lines.length === 0) {
     doc.text("Sin datos proporcionados");
-    return;
+  } else {
+    lines.forEach((line) => doc.text(line));
+  }
+}
+
+function drawKeyDetails(doc: PDFKit.PDFDocument, quote: QuoteExtraction) {
+  const meta = quote.metadata;
+  const entries: Array<[string, string | null | undefined]> = [
+    ["Packing", meta.packing],
+    ["Delivery terms", meta.deliveryTerms],
+    ["Currency", meta.currency],
+    ["Payment", meta.paymentTerms],
+    ["Guarantees", meta.guarantees],
+    ["Origin", meta.origin],
+  ];
+
+  const marginLeft = doc.page.margins?.left ?? 72;
+  const marginRight = doc.page.margins?.right ?? 72;
+  const availableWidth = doc.page.width - marginLeft - marginRight;
+  const columnCount = 2;
+  const gap = 18;
+  const boxWidth = (availableWidth - gap) / columnCount;
+  const labelColor = "#6b7280";
+  const valueColor = "#1f2937";
+
+  let cursorY = doc.y + 12;
+  let index = 0;
+
+  while (index < entries.length) {
+    const rowEntries = entries.slice(index, index + columnCount);
+    let rowHeight = 0;
+
+    rowEntries.forEach(([label, value], column) => {
+      const x = marginLeft + column * (boxWidth + gap);
+      const valueText = value && value.trim() ? value : "-";
+      const valueHeight = doc.heightOfString(valueText, { width: boxWidth - 16 });
+      const boxHeight = Math.max(32, valueHeight + 20);
+      rowHeight = Math.max(rowHeight, boxHeight);
+
+      doc.lineWidth(0.5).strokeColor("#d1d5db").rect(x, cursorY, boxWidth, boxHeight).stroke();
+
+      const previousX = doc.x;
+      const previousY = doc.y;
+
+      doc.fontSize(9).fillColor(labelColor).text(label.toUpperCase(), x + 8, cursorY + 6, { width: boxWidth - 16 });
+      doc.fontSize(10).fillColor(valueColor).text(valueText, x + 8, cursorY + 18, {
+        width: boxWidth - 16,
+      });
+
+      doc.x = previousX;
+      doc.y = previousY;
+    });
+
+    cursorY += rowHeight + 12;
+    index += columnCount;
   }
 
-  lines.forEach((line) => doc.text(line));
+  doc.y = cursorY;
+  doc.x = marginLeft;
+  doc.moveDown(0.5);
+  doc.fillColor("#111827");
 }
 
 function drawItemsTable(doc: PDFKit.PDFDocument, quote: QuoteExtraction) {
-  const tableTop = doc.y;
-  const columnPositions = {
-    index: 50,
-    description: 90,
-    quantity: 340,
-    unitPrice: 390,
-    total: 460,
-  } as const;
+  const marginLeft = doc.page.margins?.left ?? 72;
+  const marginRight = doc.page.margins?.right ?? 72;
+  const tableWidth = doc.page.width - marginLeft - marginRight;
 
-  doc.fontSize(11).fillColor("#1f2937");
-  doc.text("#", columnPositions.index, tableTop, { width: 30, align: "left" });
-  doc.text("Descripcion", columnPositions.description, tableTop, { width: 230 });
-  doc.text("Cantidad", columnPositions.quantity, tableTop, { width: 40, align: "right" });
-  doc.text("Unitario", columnPositions.unitPrice, tableTop, { width: 60, align: "right" });
-  doc.text("Total", columnPositions.total, tableTop, { width: 80, align: "right" });
+  const indexWidth = 40;
+  const quantityWidth = 70;
+  const notesWidth = Math.max(160, Math.min(220, tableWidth * 0.35));
+  const descriptionWidth = tableWidth - indexWidth - quantityWidth - notesWidth;
 
-  doc.moveDown(0.5);
-  doc.moveTo(50, doc.y).lineTo(doc.page.width - 50, doc.y).strokeColor("#e5e7eb").stroke();
+  doc.moveDown(1);
+  let cursorY = doc.y;
 
-  doc.fontSize(10).fillColor("#374151");
-  quote.items.forEach((item, index) => {
-    const rowY = doc.y + 8;
-    doc.text(String(index + 1), columnPositions.index, rowY, { width: 30 });
-    doc.text(item.description, columnPositions.description, rowY, { width: 230 });
-    doc.text(formatNumber(item.quantity), columnPositions.quantity, rowY, { width: 40, align: "right" });
-    doc.text(formatCurrency(item.unitPrice, quote.metadata.currency), columnPositions.unitPrice, rowY, {
-      width: 60,
-      align: "right",
-    });
-    doc.text(formatCurrency(item.totalPrice, quote.metadata.currency), columnPositions.total, rowY, {
-      width: 80,
-      align: "right",
-    });
-    doc.moveDown(0.8);
+  doc.lineWidth(0.5).fillColor("#e2e8f0").rect(marginLeft, cursorY, tableWidth, 22).fill();
+  doc.strokeColor("#cbd5f5").rect(marginLeft, cursorY, tableWidth, 22).stroke();
+
+  doc.fontSize(10).fillColor("#1f2937");
+  doc.text("#", marginLeft + 8, cursorY + 6, { width: indexWidth - 16 });
+  doc.text("Descripcion", marginLeft + indexWidth + 8, cursorY + 6, { width: descriptionWidth - 16 });
+  doc.text("Cantidad", marginLeft + indexWidth + descriptionWidth + 8, cursorY + 6, {
+    width: quantityWidth - 16,
+    align: "right",
   });
+  doc.text("Notas", marginLeft + indexWidth + descriptionWidth + quantityWidth + 8, cursorY + 6, {
+    width: notesWidth - 16,
+  });
+
+  cursorY += 22;
+  doc.moveTo(marginLeft, cursorY).lineTo(marginLeft + tableWidth, cursorY).strokeColor("#d1d5db").stroke();
+
+  quote.items.forEach((item, index) => {
+    const rowNumber = String(item.itemNumber ?? index + 1);
+    const description = item.richDescription ?? item.description ?? "";
+    const quantity = formatNumber(item.quantity) || "-";
+    const notes = item.notes ?? "";
+
+    const descriptionHeight = doc.heightOfString(description, { width: descriptionWidth - 16 });
+    const notesHeight = doc.heightOfString(notes, { width: notesWidth - 16 });
+    const quantityHeight = doc.heightOfString(quantity, { width: quantityWidth - 16 });
+    const rowHeight = Math.max(24, descriptionHeight + 12, notesHeight + 12, quantityHeight + 12);
+
+    const rowTop = cursorY + 4;
+    const previousX = doc.x;
+    const previousY = doc.y;
+
+    doc.fontSize(10).fillColor("#1f2937");
+    doc.text(rowNumber, marginLeft + 8, rowTop, { width: indexWidth - 16 });
+    doc.text(description, marginLeft + indexWidth + 8, rowTop, { width: descriptionWidth - 16 });
+    doc.text(quantity, marginLeft + indexWidth + descriptionWidth + 8, rowTop, {
+      width: quantityWidth - 16,
+      align: "right",
+    });
+    doc.text(notes, marginLeft + indexWidth + descriptionWidth + quantityWidth + 8, rowTop, {
+      width: notesWidth - 16,
+    });
+
+    doc.x = previousX;
+    doc.y = previousY;
+
+    cursorY += rowHeight;
+    doc.moveTo(marginLeft, cursorY).lineTo(marginLeft + tableWidth, cursorY).strokeColor("#e5e7eb").stroke();
+  });
+
+  doc.y = cursorY + 6;
+  doc.x = marginLeft;
 }
 
-function drawTotals(doc: PDFKit.PDFDocument, quote: QuoteExtraction) {
-  const totals = computeTotals(quote.items, quote.totals);
-  const currency = quote.metadata.currency;
+function drawSections(doc: PDFKit.PDFDocument, quote: QuoteExtraction, reviewer?: string | undefined) {
+  const marginLeft = doc.page.margins?.left ?? 72;
+  const marginRight = doc.page.margins?.right ?? 72;
+  const usableWidth = doc.page.width - marginLeft - marginRight;
 
-  const rows: Array<[string, number | null]> = [
-    ["Subtotal", totals.subtotal ?? null],
-    ["Impuestos", totals.taxes ?? null],
-    ["Envio", totals.shipping ?? null],
-    ["Descuento", totals.discount != null ? totals.discount * -1 : null],
-    ["Total", totals.total ?? totals.subtotal ?? null],
+  const sections: Array<[string, string | null | undefined]> = [
+    ["Packing requirements", quote.metadata.packingRequirements],
+    ["Accessories / Inclusions", quote.metadata.accessoriesInclusions],
+    ["Observaciones", quote.remarks],
   ];
 
-  const startX = 340;
-  doc.fontSize(11).fillColor("#111827");
-
-  rows.forEach(([label, value]) => {
-    if (value == null) return;
-    const y = doc.y + 6;
-    doc.text(label, startX, y, { width: 120, align: "right" });
-    doc.text(formatCurrency(value, currency), startX + 130, y, { width: 80, align: "right" });
-    doc.moveDown(0.6);
+  sections.forEach(([title, value]) => {
+    if (!value) return;
+    doc.moveDown(0.8);
+    doc.x = marginLeft;
+    doc.fillColor("#111827").fontSize(12).text(title, { underline: true, width: usableWidth });
+    doc.fontSize(10).fillColor("#374151").text(value, { width: usableWidth });
   });
-}
-
-function drawNotes(doc: PDFKit.PDFDocument, quote: QuoteExtraction, reviewer?: string | undefined) {
-  doc.fillColor("#111827").fontSize(12).text("Notas adicionales", { underline: true });
-  doc.fontSize(10).fillColor("#374151");
-
-  if (quote.remarks) {
-    doc.text(quote.remarks);
-    doc.moveDown(0.5);
-  }
-
-  if (quote.metadata.additionalNotes) {
-    doc.text(quote.metadata.additionalNotes);
-    doc.moveDown(0.5);
-  }
 
   if (reviewer) {
-    doc.text(`Revisado por: ${reviewer}`);
+    doc.moveDown(0.6);
+    doc.x = marginLeft;
+    doc.fontSize(10).fillColor("#374151").text(`Revisado por: ${reviewer}`, { width: usableWidth });
   }
+
+  doc.fillColor("#111827");
 }
 
 function formatNumber(value: number | null | undefined): string {
   if (value == null) return "";
-  return Number(value).toLocaleString("es-ES", { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+  return Number(value).toLocaleString("es-ES", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
-function formatCurrency(value: number | null | undefined, currency?: string): string {
-  if (value == null) return "";
-  const unit = currency && currency.length <= 5 ? currency.toUpperCase() : "USD";
-  try {
-    return Number(value).toLocaleString("es-ES", {
-      style: "currency",
-      currency: unit,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-  } catch (_error) {
-    return `${unit} ${Number(value).toFixed(2)}`;
-  }
-}
+
+
+
+
+
+
