@@ -4,6 +4,7 @@ export interface SupplierDetails {
   address?: string;
   phone?: string;
   email?: string;
+  website?: string;
   taxId?: string;
 }
 

@@ -184,7 +184,7 @@ async function enhanceItemDescriptions(quote: QuoteExtraction): Promise<QuoteExt
                 'El campo voltageFrequency debe reflejar valores electricos como "220V, 60Hz" cuando existan, o "-" si no aplica.',
                 'El campo referencePartNumber debe incluir numeros de parte, referencias cruzadas u otros identificadores adicionales; si faltan, responde "-".',
                 "Si algun dato no esta disponible, responde '-' sin inventar informacion.",
-                'Devuelve siempre un JSON que siga exactamente el esquema proporcionado usando el mismo indice que el item de entrada.'
+                'Devuelve siempre un JSON que siga exactamente el esquema proporcionado usando el mismo indice que el item de entrada.',
                 'All fields must be written in English.'
               ].join(' ')
             }
@@ -327,5 +327,7 @@ function tryParseJson(payload: string) {
     }
   }
 }
+
+
 
 

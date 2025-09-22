@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ChangeEvent, DragEvent, ReactNode } from "react";
+import Image from "next/image";
 import { defaultBranding } from "@/config/branding";
+import { companyProfiles, defaultCompanyProfile } from "@/config/companyProfiles";
 import type { BrandingProfile, QuoteExtraction, QuoteItem } from "@/types/quote";
 
 interface UploadState {
@@ -14,6 +16,7 @@ const ACCEPTED_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/web
 export default function Home() {
   const [quote, setQuote] = useState<QuoteExtraction | null>(null);
   const [brand, setBrand] = useState<BrandingProfile>(defaultBranding);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(defaultCompanyProfile.id);
   const [reviewer, setReviewer] = useState("");
   const [uploadState, setUploadState] = useState<UploadState>({ isDragging: false });
   const [isProcessing, setProcessing] = useState(false);
@@ -21,10 +24,18 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
 
+  const selectedCompany = useMemo(() => {
+    return companyProfiles.find((profile) => profile.id === selectedCompanyId) ?? defaultCompanyProfile;
+  }, [selectedCompanyId]);
+
+  useEffect(() => {
+    setBrand(selectedCompany.branding);
+  }, [selectedCompany]);
+
   const handleFile = useCallback(async (file: File | null) => {
     if (!file) return;
     if (!ACCEPTED_TYPES.includes(file.type)) {
-      setError("Formato no soportado. Usa PDF o imagen (png, jpg, webp, tiff).");
+      setError("Unsupported format. Use PDF or images (png, jpg, webp, tiff).");
       return;
     }
 
@@ -41,14 +52,14 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        const payload = await response.json().catch(() => ({ error: "Error desconocido" }));
-        throw new Error(payload.error ?? "Fallo al procesar el documento");
+        const payload = await response.json().catch(() => ({ error: "Unknown error" }));
+        throw new Error(payload.error ?? "Failed to process the document");
       }
 
       const payload = (await response.json()) as { data: QuoteExtraction };
       setQuote(payload.data);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Fallo inesperado";
+      const message = err instanceof Error ? err.message : "Unexpected failure";
       setError(message);
     } finally {
       setProcessing(false);
@@ -336,6 +347,13 @@ export default function Home() {
               </Card>
 
               <Card title="Branding & Reviewer">
+                <SelectField
+                  label="Issuing company"
+                  value={selectedCompanyId}
+                  onChange={setSelectedCompanyId}
+                  options={companyProfiles.map((profile) => ({ value: profile.id, label: profile.label }))}
+                />
+                <p className="text-xs text-slate-500">Switching the issuing company updates supplier details and branding defaults automatically.</p>
                 <div className="grid gap-4 md:grid-cols-2">
                   <TextField label="Company name" value={brand.companyName} onChange={(value) => handleBrandLineChange("companyName", value)} />
                   <TextField label="Primary color" value={brand.primaryColor} onChange={(value) => handleBrandLineChange("primaryColor", value)} />
@@ -408,6 +426,25 @@ function TextField({ label, value, onChange, placeholder }: { label: string; val
   );
 }
 
+function SelectField({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }>; }) {
+  return (
+    <label className="flex flex-col text-xs font-medium text-slate-600">
+      <span className="mb-1 uppercase tracking-wide">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring focus:ring-blue-100"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function TextAreaField({ label, value, onChange, placeholder, highlight = false, helperText }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; highlight?: boolean; helperText?: string }) {
   const containerClass = highlight
     ? "flex flex-col rounded-md border border-blue-200 bg-blue-50 p-3 text-xs font-medium text-slate-600 shadow-inner"
@@ -472,12 +509,13 @@ function PartyForm({
 
   return (
     <div className="space-y-3 text-sm">
-      <TextField label="Empresa" value={supplier.companyName ?? ""} onChange={(value) => onChange("companyName", value)} />
+      <TextField label="Company" value={supplier.companyName ?? ""} onChange={(value) => onChange("companyName", value)} />
       <TextField label="Contact" value={supplier.name ?? ""} onChange={(value) => onChange("name", value)} />
       <TextAreaField label="Address" value={supplier.address ?? ""} onChange={(value) => onChange("address", value)} />
-      <TextField label="Telefono" value={supplier.phone ?? ""} onChange={(value) => onChange("phone", value)} />
+      <TextField label="Phone" value={supplier.phone ?? ""} onChange={(value) => onChange("phone", value)} />
       <TextField label="Email" value={supplier.email ?? ""} onChange={(value) => onChange("email", value)} />
-      <TextField label="Identificacion fiscal" value={supplier.taxId ?? ""} onChange={(value) => onChange("taxId", value)} />
+      <TextField label="Website" value={supplier.website ?? ""} onChange={(value) => onChange("website", value)} />
+      <TextField label="Tax ID" value={supplier.taxId ?? ""} onChange={(value) => onChange("taxId", value)} />
     </div>
   );
 }
@@ -496,15 +534,27 @@ function PreviewDocument({ quote, brand, reviewer }: { quote: QuoteExtraction; b
   return (
     <div className="space-y-5 text-sm text-slate-700">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-lg font-semibold text-slate-900">{brand.companyName}</p>
-          <div className="mt-1 text-xs text-slate-500">
-            {brand.addressLines.map((line, idx) => (
-              <p key={`address-${idx}`}>{line}</p>
-            ))}
-            {brand.contactLines.map((line, idx) => (
-              <p key={`contact-${idx}`}>{line}</p>
-            ))}
+        <div className="flex flex-wrap items-start gap-4">
+          {brand.logoRelativePath ? (
+            <Image
+              src={`/${brand.logoRelativePath}`}
+              alt={`${brand.companyName} logo`}
+              width={128}
+              height={80}
+              className="h-16 w-auto object-contain"
+              priority
+            />
+          ) : null}
+          <div>
+            <p className="text-lg font-semibold text-slate-900">{brand.companyName}</p>
+            <div className="mt-1 text-xs text-slate-500">
+              {brand.addressLines.map((line, idx) => (
+                <p key={`address-${idx}`}>{line}</p>
+              ))}
+              {brand.contactLines.map((line, idx) => (
+                <p key={`contact-${idx}`}>{line}</p>
+              ))}
+            </div>
           </div>
         </div>
         <div className="text-right text-xs text-slate-500">
@@ -585,12 +635,12 @@ function PreviewDocument({ quote, brand, reviewer }: { quote: QuoteExtraction; b
 
 function PartyPreview({ data }: { data?: QuoteExtraction["metadata"]["supplier"] }) {
   if (!data) {
-    return <p className="text-slate-400">Sin informacion</p>;
+    return <p className="text-slate-400">No information provided</p>;
   }
 
-  const lines = [data.companyName, data.name, data.address, data.phone, data.email, data.taxId].filter(Boolean);
+  const lines = [data.companyName, data.name, data.address, data.phone, data.email, data.website, data.taxId].filter(Boolean);
   if (lines.length === 0) {
-    return <p className="text-slate-400">Sin informacion</p>;
+    return <p className="text-slate-400">No information provided</p>;
   }
 
   return (
@@ -609,6 +659,7 @@ function prepareQuoteForDocument(quote: QuoteExtraction): QuoteExtraction {
     address: supplier?.address ?? "",
     phone: supplier?.phone ?? "",
     email: supplier?.email ?? "",
+    website: supplier?.website ?? "",
     taxId: supplier?.taxId ?? "",
   });
 
@@ -657,5 +708,5 @@ function splitLines(value: string): string[] {
 
 function formatNumber(value: number | null | undefined): string {
   if (value == null) return "";
-  return Number(value).toLocaleString("es-ES", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return Number(value).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }

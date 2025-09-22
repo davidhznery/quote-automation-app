@@ -121,11 +121,12 @@ function drawSupplierSection(doc: PDFKit.PDFDocument, quote: QuoteExtraction) {
   if (supplier.address) lines.push(supplier.address);
   if (supplier.phone) lines.push(`Tel: ${supplier.phone}`);
   if (supplier.email) lines.push(`Email: ${supplier.email}`);
+  if (supplier.website) lines.push(`Website: ${supplier.website}`);
   if (supplier.taxId) lines.push(`Tax ID: ${supplier.taxId}`);
 
   doc.fontSize(10).fillColor("#374151");
   if (lines.length === 0) {
-    doc.text("Sin datos proporcionados");
+    doc.text("No details provided");
   } else {
     lines.forEach((line) => doc.text(line));
   }
@@ -207,12 +208,12 @@ function drawItemsTable(doc: PDFKit.PDFDocument, quote: QuoteExtraction) {
 
   doc.fontSize(10).fillColor("#1f2937");
   doc.text("#", marginLeft + 8, cursorY + 6, { width: indexWidth - 16 });
-  doc.text("Descripcion", marginLeft + indexWidth + 8, cursorY + 6, { width: descriptionWidth - 16 });
-  doc.text("Cantidad", marginLeft + indexWidth + descriptionWidth + 8, cursorY + 6, {
+  doc.text("Description", marginLeft + indexWidth + 8, cursorY + 6, { width: descriptionWidth - 16 });
+  doc.text("Quantity", marginLeft + indexWidth + descriptionWidth + 8, cursorY + 6, {
     width: quantityWidth - 16,
     align: "right",
   });
-  doc.text("Notas", marginLeft + indexWidth + descriptionWidth + quantityWidth + 8, cursorY + 6, {
+  doc.text("Notes", marginLeft + indexWidth + descriptionWidth + quantityWidth + 8, cursorY + 6, {
     width: notesWidth - 16,
   });
 
@@ -264,7 +265,7 @@ function drawSections(doc: PDFKit.PDFDocument, quote: QuoteExtraction, reviewer?
   const sections: Array<[string, string | null | undefined]> = [
     ["Packing requirements", quote.metadata.packingRequirements],
     ["Accessories / Inclusions", quote.metadata.accessoriesInclusions],
-    ["Observaciones", quote.remarks],
+    ["Additional notes", quote.remarks],
   ];
 
   sections.forEach(([title, value]) => {
@@ -278,7 +279,7 @@ function drawSections(doc: PDFKit.PDFDocument, quote: QuoteExtraction, reviewer?
   if (reviewer) {
     doc.moveDown(0.6);
     doc.x = marginLeft;
-    doc.fontSize(10).fillColor("#374151").text(`Revisado por: ${reviewer}`, { width: usableWidth });
+    doc.fontSize(10).fillColor("#374151").text(`Reviewed by: ${reviewer}`, { width: usableWidth });
   }
 
   doc.fillColor("#111827");
@@ -286,7 +287,7 @@ function drawSections(doc: PDFKit.PDFDocument, quote: QuoteExtraction, reviewer?
 
 function formatNumber(value: number | null | undefined): string {
   if (value == null) return "";
-  return Number(value).toLocaleString("es-ES", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return Number(value).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
 

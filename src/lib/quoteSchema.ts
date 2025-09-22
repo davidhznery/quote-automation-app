@@ -16,6 +16,7 @@ const supplierSchema = z
     address: optionalString,
     phone: optionalString,
     email: optionalString,
+    website: optionalString,
     taxId: optionalString,
   })
   .partial();
@@ -103,13 +104,14 @@ export const quoteExtractionJsonSchema = {
         supplier: {
           type: "object",
           additionalProperties: false,
-          required: ["name", "companyName", "address", "phone", "email", "taxId"],
+          required: ["name", "companyName", "address", "phone", "email", "website", "taxId"],
           properties: {
             name: { type: ["string", "null"] },
             companyName: { type: ["string", "null"] },
             address: { type: ["string", "null"] },
             phone: { type: ["string", "null"] },
             email: { type: ["string", "null"] },
+            website: { type: ["string", "null"] },
             taxId: { type: ["string", "null"] },
           },
         },
