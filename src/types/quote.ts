@@ -19,6 +19,7 @@ export interface QuoteItem {
 
 export interface QuoteMetadata {
   supplier?: SupplierDetails;
+  quoteNumber?: string | null;
   rfqNumber?: string | null;
   issueDate?: string | null;
   dueDate?: string | null;

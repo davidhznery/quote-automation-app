@@ -43,7 +43,10 @@ export async function POST(request: NextRequest) {
     const trimmedQuote = quote.metadata.quoteNumber?.replace(/[^a-zA-Z0-9_-]/g, "") ?? Date.now().toString();
     const fileName = `cotizacion-${trimmedQuote}.pdf`;
 
-    return new NextResponse(pdfBuffer, {
+    const pdfBytes: Uint8Array = pdfBuffer instanceof Uint8Array ? pdfBuffer : new Uint8Array(pdfBuffer);
+    const pdfBody = pdfBytes.buffer.slice(pdfBytes.byteOffset, pdfBytes.byteOffset + pdfBytes.byteLength) as ArrayBuffer;
+
+    return new NextResponse(pdfBody, {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
@@ -289,10 +292,5 @@ function formatNumber(value: number | null | undefined): string {
   if (value == null) return "";
   return Number(value).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
-
-
-
-
-
 
 

@@ -54,6 +54,7 @@ export const quoteExtractionSchema = z
     metadata: z
       .object({
         supplier: supplierSchema.optional(),
+        quoteNumber: optionalString,
         rfqNumber: optionalString,
         issueDate: optionalString,
         dueDate: optionalString,
@@ -87,6 +88,7 @@ export const quoteExtractionJsonSchema = {
       additionalProperties: false,
       required: [
         "supplier",
+        "quoteNumber",
         "rfqNumber",
         "issueDate",
         "dueDate",
@@ -115,6 +117,7 @@ export const quoteExtractionJsonSchema = {
             taxId: { type: ["string", "null"] },
           },
         },
+        quoteNumber: { type: ["string", "null"] },
         rfqNumber: { type: ["string", "null"] },
         issueDate: { type: ["string", "null"] },
         dueDate: { type: ["string", "null"] },
@@ -208,3 +211,4 @@ export function normalizeNumber(value: unknown): number | null {
   const parsed = Number(normalised);
   return Number.isFinite(parsed) ? parsed : null;
 }
+

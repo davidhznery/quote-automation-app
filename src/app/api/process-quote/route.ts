@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import OpenAI, { toFile } from "openai";
+import type { ResponseInputMessageContentList } from "openai/resources/responses/responses";
 import type { QuoteExtraction } from "@/types/quote";
 import { normalizeExtraction, quoteExtractionJsonSchema } from "@/lib/quoteSchema";
 
@@ -53,7 +54,7 @@ export async function POST(request: NextRequest) {
 
     const buffer = Buffer.from(await fileEntry.arrayBuffer());
 
-    const inputContent: Array<Record<string, unknown>> = [
+    const inputContent: ResponseInputMessageContentList = [
       {
         type: "input_text",
         text: [
