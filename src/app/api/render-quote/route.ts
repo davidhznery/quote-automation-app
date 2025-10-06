@@ -206,22 +206,43 @@ function drawItemsTable(doc: PDFKit.PDFDocument, quote: QuoteExtraction) {
   doc.moveDown(1);
   let cursorY = doc.y;
 
-  doc.lineWidth(0.5).fillColor("#e2e8f0").rect(marginLeft, cursorY, tableWidth, 22).fill();
-  doc.strokeColor("#cbd5f5").rect(marginLeft, cursorY, tableWidth, 22).stroke();
+  const drawHeaderRow = () => {
+    doc.lineWidth(0.5).fillColor("#e2e8f0").rect(marginLeft, cursorY, tableWidth, 22).fill();
+    doc.strokeColor("#cbd5f5").rect(marginLeft, cursorY, tableWidth, 22).stroke();
 
-  doc.fontSize(10).fillColor("#1f2937");
-  doc.text("#", marginLeft + 8, cursorY + 6, { width: indexWidth - 16 });
-  doc.text("Description", marginLeft + indexWidth + 8, cursorY + 6, { width: descriptionWidth - 16 });
-  doc.text("Quantity", marginLeft + indexWidth + descriptionWidth + 8, cursorY + 6, {
-    width: quantityWidth - 16,
-    align: "right",
-  });
-  doc.text("Notes", marginLeft + indexWidth + descriptionWidth + quantityWidth + 8, cursorY + 6, {
-    width: notesWidth - 16,
-  });
+    doc.fontSize(10).fillColor("#1f2937");
+    doc.text("#", marginLeft + 8, cursorY + 6, { width: indexWidth - 16 });
+    doc.text("Description", marginLeft + indexWidth + 8, cursorY + 6, {
+      width: descriptionWidth - 16,
+    });
+    doc.text("Quantity", marginLeft + indexWidth + descriptionWidth + 8, cursorY + 6, {
+      width: quantityWidth - 16,
+      align: "right",
+    });
+    doc.text("Notes", marginLeft + indexWidth + descriptionWidth + quantityWidth + 8, cursorY + 6, {
+      width: notesWidth - 16,
+    });
 
-  cursorY += 22;
-  doc.moveTo(marginLeft, cursorY).lineTo(marginLeft + tableWidth, cursorY).strokeColor("#d1d5db").stroke();
+    cursorY += 22;
+    doc
+      .moveTo(marginLeft, cursorY)
+      .lineTo(marginLeft + tableWidth, cursorY)
+      .strokeColor("#d1d5db")
+      .stroke();
+  };
+
+  const ensureRowFits = (rowHeight: number) => {
+    const bottomMargin = doc.page.margins?.bottom ?? 72;
+    const availableBottom = doc.page.height - bottomMargin;
+    if (cursorY + rowHeight > availableBottom) {
+      doc.addPage();
+      doc.moveDown(1);
+      cursorY = doc.y;
+      drawHeaderRow();
+    }
+  };
+
+  drawHeaderRow();
 
   quote.items.forEach((item, index) => {
     const rowNumber = String(item.itemNumber ?? index + 1);
@@ -233,6 +254,8 @@ function drawItemsTable(doc: PDFKit.PDFDocument, quote: QuoteExtraction) {
     const notesHeight = doc.heightOfString(notes, { width: notesWidth - 16 });
     const quantityHeight = doc.heightOfString(quantity, { width: quantityWidth - 16 });
     const rowHeight = Math.max(24, descriptionHeight + 12, notesHeight + 12, quantityHeight + 12);
+
+    ensureRowFits(rowHeight);
 
     const rowTop = cursorY + 4;
     const previousX = doc.x;
@@ -253,7 +276,11 @@ function drawItemsTable(doc: PDFKit.PDFDocument, quote: QuoteExtraction) {
     doc.y = previousY;
 
     cursorY += rowHeight;
-    doc.moveTo(marginLeft, cursorY).lineTo(marginLeft + tableWidth, cursorY).strokeColor("#e5e7eb").stroke();
+    doc
+      .moveTo(marginLeft, cursorY)
+      .lineTo(marginLeft + tableWidth, cursorY)
+      .strokeColor("#e5e7eb")
+      .stroke();
   });
 
   doc.y = cursorY + 6;
@@ -292,5 +319,4 @@ function formatNumber(value: number | null | undefined): string {
   if (value == null) return "";
   return Number(value).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
-
 
