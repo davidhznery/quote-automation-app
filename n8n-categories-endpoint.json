@@ -1,0 +1,120 @@
+{
+  "name": "Categories Endpoint - Get Available Categories",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "categories",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-categories",
+      "name": "Webhook Categories",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": "{{ENV_SPREADSHEET_ID}}",
+        "sheetName": "Routes",
+        "options": {
+          "headerRow": true
+        }
+      },
+      "id": "read-routes-sheets",
+      "name": "Read Routes (Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_SHEETS_CREDENTIAL",
+          "name": "Google Sheets OAuth2 API account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get all categories from Routes sheet\nconst routes = $items(\"Read Routes (Sheets)\").map(i => i.json);\n\n// Extract unique categories (case-insensitive)\nconst categoriesSet = new Set();\nroutes.forEach(route => {\n  if (route.categoria) {\n    categoriesSet.add(String(route.categoria).trim().toLowerCase());\n  }\n});\n\n// Convert to sorted array\nconst categories = Array.from(categoriesSet).sort();\n\nreturn [{\n  json: {\n    categories: categories\n  }\n}];"
+      },
+      "id": "function-extract-categories",
+      "name": "Function: Extract Categories",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}"
+      },
+      "id": "respond-to-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        900,
+        300
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Categories": {
+      "main": [
+        [
+          {
+            "node": "Read Routes (Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Routes (Sheets)": {
+      "main": [
+        [
+          {
+            "node": "Function: Extract Categories",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function: Extract Categories": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "categories-endpoint",
+  "tags": []
+}

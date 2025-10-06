@@ -1,0 +1,278 @@
+{
+  "name": "RFQ Router - User Category Selection",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rfq-router-min",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-rfq-router",
+      "name": "Webhook RFQ Router",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": "{{ENV_SPREADSHEET_ID}}",
+        "sheetName": "Suppliers",
+        "options": {
+          "headerRow": true
+        }
+      },
+      "id": "read-suppliers-sheets",
+      "name": "Read Suppliers (Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_SHEETS_CREDENTIAL",
+          "name": "Google Sheets OAuth2 API account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": "{{ENV_SPREADSHEET_ID}}",
+        "sheetName": "Routes",
+        "options": {
+          "headerRow": true
+        }
+      },
+      "id": "read-routes-sheets",
+      "name": "Read Routes (Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_SHEETS_CREDENTIAL",
+          "name": "Google Sheets OAuth2 API account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Helpers\nconst toList = (csv) => String(csv || \"\")\n  .split(\",\").map(s => s.trim().toLowerCase()).filter(Boolean);\nconst includesCSV = (csv, value) =>\n  value && toList(csv).includes(String(value).trim().toLowerCase());\nconst isTrue = (v) => (typeof v === \"boolean\") ? v : [\"true\",\"1\",\"yes\"].includes(String(v).toLowerCase());\nconst render = (tpl, ctx) => String(tpl || \"\").replace(/\\{\\{(\\w+)\\}\\}/g, (_, k) => ctx[k] ?? \"\");\n\n// Inputs\nconst input = $items(\"Webhook RFQ Router\", 0, 0).json; // { rfq_number, categoria, mi_empresa, rfq_url }\nconst suppliers = $items(\"Read Suppliers (Sheets)\").map(i => i.json);\nconst routes = $items(\"Read Routes (Sheets)\").map(i => i.json);\n\n// Validación básica\nif (!input.categoria) {\n  return [{ json: { summary: { sent: 0, reason: \"no_category\", categoria: \"\", rfq_number: input.rfq_number || \"\", suppliers: [] } } }];\n}\n\n// Ruta por categoria (case-insensitive)\nconst wanted = String(input.categoria).toLowerCase().trim();\nconst route = routes.find(r => String(r.categoria || \"\").toLowerCase().trim() === wanted);\n\nif (!route) {\n  return [{ json: { summary: { sent: 0, reason: \"no_route\", categoria: input.categoria, rfq_number: input.rfq_number, suppliers: [] } } }];\n}\n\n// Suppliers activos y que incluyan la categoria\nlet matches = suppliers\n  .filter(p => isTrue(p.activo))\n  .filter(p => includesCSV(p.categorias, input.categoria));\n\nif (matches.length === 0) {\n  return [{ json: { summary: { sent: 0, reason: \"no_suppliers\", categoria: input.categoria, rfq_number: input.rfq_number, suppliers: [] } } }];\n}\n\n// Items para envío\nconst itemsForSend = matches.map(p => {\n  const ctx = {\n    supplier_name: p.supplier_name,\n    rfq_number: input.rfq_number,\n    mi_empresa: input.mi_empresa,\n    categoria: input.categoria\n  };\n  return {\n    json: {\n      email: p.email,\n      supplier_name: p.supplier_name,\n      rfq_number: input.rfq_number,\n      mi_empresa: input.mi_empresa,\n      categoria: input.categoria,\n      rfq_url: input.rfq_url,\n      asunto: render(route.asunto_template, ctx),\n      body: render(route.body_template, ctx)\n    }\n  };\n});\n\n// Ítem resumen para la otra rama\nconst summaryItem = {\n  json: {\n    summary: {\n      sent: itemsForSend.length,\n      reason: \"ok\",\n      categoria: input.categoria,\n      rfq_number: input.rfq_number,\n      suppliers: itemsForSend.map(i => i.json.email)\n    }\n  }\n};\n\nreturn [...itemsForSend, summaryItem];"
+      },
+      "id": "code-filter-compose-emails",
+      "name": "Code: Filter & Compose Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.rfq_url }}",
+        "options": {
+          "download": true,
+          "binaryPropertyName": "data"
+        }
+      },
+      "id": "http-download-rfq",
+      "name": "HTTP: Download RFQ",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "{{ $('Webhook RFQ Router').item.json.mi_empresa }}",
+        "toEmail": "={{ $json.email }}",
+        "subject": "={{ $json.asunto }}",
+        "text": "={{ $json.body }}",
+        "attachments": "={{ $binary.data }}",
+        "options": {
+          "attachmentPropertyName": "data"
+        }
+      },
+      "id": "email-send-to-supplier",
+      "name": "Email: Send to Supplier",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1340,
+        200
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "SMTP_CREDENTIAL",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst s = items.find(i => i.json && i.json.summary);\nreturn [ s ? { json: s.json.summary } : { json: { sent: 0, reason: \"unknown\", suppliers: [] } } ];"
+      },
+      "id": "code-aggregate-summary",
+      "name": "Code: Aggregate Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "waitForAll",
+        "options": {}
+      },
+      "id": "merge-wait-all",
+      "name": "Merge: Wait All",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        1560,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}"
+      },
+      "id": "respond-to-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1780,
+        300
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook RFQ Router": {
+      "main": [
+        [
+          {
+            "node": "Read Suppliers (Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Suppliers (Sheets)": {
+      "main": [
+        [
+          {
+            "node": "Read Routes (Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Routes (Sheets)": {
+      "main": [
+        [
+          {
+            "node": "Code: Filter & Compose Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Filter & Compose Emails": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Download RFQ",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Aggregate Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Download RFQ": {
+      "main": [
+        [
+          {
+            "node": "Email: Send to Supplier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email: Send to Supplier": {
+      "main": [
+        [
+          {
+            "node": "Merge: Wait All",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Aggregate Summary": {
+      "main": [
+        [
+          {
+            "node": "Merge: Wait All",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge: Wait All": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "rfq-router-user-category",
+  "tags": []
+}
