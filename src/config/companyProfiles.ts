@@ -44,9 +44,27 @@ const dleSupplier: SupplierDetails = {
   taxId: "14596/2019",
 };
 
+const dugBranding: BrandingProfile = {
+  companyName: "Delta United Group",
+  addressLines: ["Tajoura Al Andalusy", "Alshat road P.O Box 30694", "Tripoli, Libya"],
+  contactLines: ["Tel: +218 218213698092", "info@deltaunited.me", "https://deltaunited.me"],
+  logoRelativePath: "branding/dug-logo.jpeg",
+  primaryColor: "#0076a8",
+  accentColor: "#004f75",
+};
+
+const dugSupplier: SupplierDetails = {
+  companyName: "Delta United Group",
+  address: "Tajoura Al Andalusy, Alshat road P.O Box 30694, Tripoli, Libya",
+  phone: "+218 218213698092",
+  email: "info@deltaunited.me",
+  website: "https://deltaunited.me",
+};
+
 export const companyProfiles: CompanyProfile[] = [
   { id: "sos", label: "SOS - Superb Oil Stream", branding: sosBranding, supplier: sosSupplier },
   { id: "dle", label: "DLE - Delta FZ LLE", branding: dleBranding, supplier: dleSupplier },
+  { id: "dug", label: "DUG - Delta United Group", branding: dugBranding, supplier: dugSupplier },
 ];
 
 export const defaultCompanyProfile = companyProfiles[0];
