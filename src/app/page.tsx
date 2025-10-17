@@ -23,6 +23,7 @@ export default function Home() {
   const [isDownloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
+  const [isChatOpen, setChatOpen] = useState(false);
 
   const selectedCompany = useMemo(() => {
     return companyProfiles.find((profile) => profile.id === selectedCompanyId) ?? defaultCompanyProfile;
@@ -213,6 +214,13 @@ export default function Home() {
   };
 
   const dropzoneClasses = `flex h-44 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed transition ${uploadState.isDragging ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-white hover:border-blue-400"}`;
+  const toggleChat = useCallback(() => {
+    setChatOpen((open) => !open);
+  }, []);
+
+  const closeChat = useCallback(() => {
+    setChatOpen(false);
+  }, []);
 
   return (
     <main className="min-h-screen bg-slate-50 pb-16">
@@ -244,7 +252,6 @@ export default function Home() {
 
           {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
         </section>
-
         {quote ? (
           <div className="mt-12 grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)]">
             <div className="space-y-6">
@@ -394,6 +401,46 @@ export default function Home() {
           </div>
         ) : null}
       </div>
+
+      <button
+        type="button"
+        onClick={toggleChat}
+        className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-full bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
+        aria-label={isChatOpen ? "Hide chatbot" : "Open chatbot"}
+        aria-expanded={isChatOpen}
+        aria-haspopup="dialog"
+      >
+        {isChatOpen ? "Hide Chat" : "Open Chatbot"}
+      </button>
+
+      {isChatOpen ? (
+        <aside
+          className="fixed bottom-24 right-6 z-50 flex h-[560px] w-full max-w-sm flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+          role="dialog"
+          aria-label="Database chatbot"
+        >
+          <div className="flex items-center justify-between bg-slate-900 px-4 py-3 text-sm font-semibold text-white">
+            <span>Database Chatbot</span>
+            <button
+              type="button"
+              onClick={closeChat}
+              className="rounded-md px-2 py-1 text-xs font-medium text-white transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-200 focus:ring-offset-2"
+              aria-label="Close chatbot"
+            >
+              Close
+            </button>
+          </div>
+          <div className="flex-1">
+            <iframe
+              title="Database Chatbot"
+              src="https://databasechatbot.vercel.app/"
+              loading="lazy"
+              className="h-full w-full"
+              allow="clipboard-write; microphone; camera"
+            />
+          </div>
+        </aside>
+      ) : null}
     </main>
   );
 }
